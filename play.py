@@ -95,7 +95,7 @@ class GPUProvider:
         self._nvml_handles = []
         self._last_smi_time: float = 0.0
         self._last_smi_utils: List[float] = []
-        self._smi_min_interval = 0.2  # seconds; avoid hammering nvidia-smi every 50ms
+        self._smi_min_interval = 0.02  # seconds; avoid hammering nvidia-smi every 5ms
 
         # Try NVML
         try:
@@ -362,9 +362,9 @@ class MetricCard(QWidget):
 
 
 class SystemMonitor(QMainWindow):
-    def __init__(self, interval_ms: int = 50) -> None:
+    def __init__(self, interval_ms: int = 5) -> None:
         super().__init__()
-        self.setWindowTitle("System Monitor (50ms)")
+        self.setWindowTitle("System Monitor (5ms)")
         self.resize(1200, 800)
 
         self.interval_ms = interval_ms
@@ -383,6 +383,8 @@ class SystemMonitor(QMainWindow):
         self.card_mem = MetricCard("Memory", unit="%", is_percent=True, color="#ffd54f")
         self.card_net_up = MetricCard("Net Up", unit="MB/s", is_percent=False, color="#2962ff")
         self.card_net_down = MetricCard("Net Down", unit="MB/s", is_percent=False, color="#ff5252")
+        self.card_disk_read = MetricCard("Disk Read", unit="MB/s", is_percent=False, color="#00bcd4")
+        self.card_disk_write = MetricCard("Disk Write", unit="MB/s", is_percent=False, color="#ab47bc")
         gpu_names_dash = self.gpu_provider.gpu_names()
         self.card_gpu = MetricCard("GPU", unit="%", is_percent=True, color="#7c4dff")
         if not gpu_names_dash:
@@ -392,7 +394,9 @@ class SystemMonitor(QMainWindow):
         grid.addWidget(self.card_mem, 0, 1)
         grid.addWidget(self.card_net_up, 1, 0)
         grid.addWidget(self.card_net_down, 1, 1)
-        grid.addWidget(self.card_gpu, 2, 0, 1, 2)
+        grid.addWidget(self.card_disk_read, 2, 0)
+        grid.addWidget(self.card_disk_write, 2, 1)
+        grid.addWidget(self.card_gpu, 3, 0, 1, 2)
 
         tabs.addTab(self.dashboard, "Dashboard")
 
@@ -401,6 +405,9 @@ class SystemMonitor(QMainWindow):
         self.chart_mem = TimeSeriesChart("Memory Utilization", ["Mem %"], y_range=(0, 100))
         self.chart_net = TimeSeriesChart(
             "Network Throughput (MB/s)", ["Up", "Down"], y_range=(0, 10), auto_scale=True
+        )
+        self.chart_disk = TimeSeriesChart(
+            "Disk Throughput (MB/s)", ["Read", "Write"], y_range=(0, 10), auto_scale=True
         )
         gpu_names = self.gpu_provider.gpu_names()
         if gpu_names:
@@ -414,9 +421,11 @@ class SystemMonitor(QMainWindow):
         cpu_tab = QWidget(); cpu_l = QVBoxLayout(cpu_tab); cpu_l.addWidget(self.chart_cpu)
         mem_tab = QWidget(); mem_l = QVBoxLayout(mem_tab); mem_l.addWidget(self.chart_mem)
         net_tab = QWidget(); net_l = QVBoxLayout(net_tab); net_l.addWidget(self.chart_net)
+        disk_tab = QWidget(); disk_l = QVBoxLayout(disk_tab); disk_l.addWidget(self.chart_disk)
         tabs.addTab(cpu_tab, "CPU")
         tabs.addTab(mem_tab, "Memory")
         tabs.addTab(net_tab, "Network")
+        tabs.addTab(disk_tab, "Disk")
         if self.chart_gpu is not None:
             gpu_tab = QWidget(); gpu_l = QVBoxLayout(gpu_tab); gpu_l.addWidget(self.chart_gpu)
             tabs.addTab(gpu_tab, "GPU")
@@ -439,6 +448,10 @@ class SystemMonitor(QMainWindow):
         # Dynamic network scale baselines
         self._net_dyn_up = 1.0
         self._net_dyn_down = 1.0
+        # Disk IO state and dynamic scale baselines
+        self._last_disk = psutil.disk_io_counters()
+        self._disk_dyn_read = 1.0
+        self._disk_dyn_write = 1.0
 
         self.refresh_info()
 
@@ -536,6 +549,25 @@ class SystemMonitor(QMainWindow):
         self.card_net_up.update_value(up_mbs, ref_max=self._net_dyn_up)
         self.card_net_down.update_value(down_mbs, ref_max=self._net_dyn_down)
         self.chart_net.append([up_mbs, down_mbs])
+
+        # Disk (MB/s)
+        try:
+            dio = psutil.disk_io_counters()
+        except Exception:
+            dio = None
+        if dio and getattr(self, "_last_disk", None):
+            read_mbs = max(0.0, (dio.read_bytes - self._last_disk.read_bytes) / dt) / (1024 * 1024)
+            write_mbs = max(0.0, (dio.write_bytes - self._last_disk.write_bytes) / dt) / (1024 * 1024)
+        else:
+            read_mbs = 0.0
+            write_mbs = 0.0
+        self._last_disk = dio
+        # Update dynamic reference maxes (decay slowly)
+        self._disk_dyn_read = max(read_mbs, self._disk_dyn_read * 0.98)
+        self._disk_dyn_write = max(write_mbs, self._disk_dyn_write * 0.98)
+        self.card_disk_read.update_value(read_mbs, ref_max=self._disk_dyn_read)
+        self.card_disk_write.update_value(write_mbs, ref_max=self._disk_dyn_write)
+        self.chart_disk.append([read_mbs, write_mbs])
 
         # GPU
         utils = self.gpu_provider.gpu_utils()
