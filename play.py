@@ -4,10 +4,10 @@ Real-time System Monitor (PySide6)
 Dependencies:
 - PySide6 (Qt 6)
 - psutil
-- Optional: pynvml (for NVIDIA GPU metrics) or system nvidia-smi
+- Optional: nvidia-ml-py (for NVIDIA GPU metrics) or system nvidia-smi
 
 Install:
-  pip install PySide6 psutil pynvml
+  pip install PySide6 psutil nvidia-ml-py
 
 Run:
   python play.py
@@ -85,7 +85,7 @@ def apply_dark_theme(app: QApplication) -> None:
 # ----------------------------- GPU Provider -----------------------------
 class GPUProvider:
     """Provides GPU names and utilization percentages.
-    Tries pynvml first; falls back to calling nvidia-smi if available.
+    Tries nvidia-ml-py first; falls back to calling nvidia-smi if available.
     """
 
     def __init__(self) -> None:
@@ -97,17 +97,23 @@ class GPUProvider:
         self._last_smi_utils: List[float] = []
         self._smi_min_interval = 0.02  # seconds; avoid hammering nvidia-smi every 5ms
 
-        # Try NVML
+        # Try NVML (nvidia-ml-py)
         try:
-            import pynvml  # type: ignore
-
-            pynvml.nvmlInit()
-            count = pynvml.nvmlDeviceGetCount()
-            self._nvml = pynvml
+            from pynvml import smi  # type: ignore
+            # Alternative import method for nvidia-ml-py
+            try:
+                import pynvml as nvml  # type: ignore
+            except ImportError:
+                # If the above fails, try the new package structure
+                import nvidia_smi as nvml  # type: ignore
+            
+            nvml.nvmlInit()
+            count = nvml.nvmlDeviceGetCount()
+            self._nvml = nvml
             for i in range(count):
-                h = pynvml.nvmlDeviceGetHandleByIndex(i)
+                h = nvml.nvmlDeviceGetHandleByIndex(i)
                 self._nvml_handles.append(h)
-                name = pynvml.nvmlDeviceGetName(h)
+                name = nvml.nvmlDeviceGetName(h)
                 # bytes to str if needed
                 if isinstance(name, bytes):
                     name = name.decode("utf-8", errors="ignore")
