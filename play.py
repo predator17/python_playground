@@ -13,7 +13,7 @@ Run:
   python play.py
 
 Notes:
-- Updates every 50 ms by default.
+- Updates every 5 ms by default.
 - Uses QtCharts for efficient, built-in plotting (no extra plotting libs required).
 """
 from __future__ import annotations
