@@ -10,7 +10,7 @@ Fast, elegant, real‑time system monitor for desktop. Built with PySide6 + psut
 ![main](screenshots/main.png)
 ![cpu](screenshots/cpu.png)
 ![GPU](screenshots/gpu.png)
-![Processes](screenshots/process.png)
+![processes](screenshots/processes.png)
 
 
 ## Features | 功能亮点
