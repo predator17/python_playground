@@ -1,134 +1,78 @@
 # System Monitor (PySide6)
 
-A fast, modern, dark‑themed system monitor for desktop, built with PySide6 and psutil. It provides an at‑a‑glance dashboard plus detailed tabs for CPU, Memory, Network, Disk, GPU, and Processes. Smooth charts, per‑core views, and smart autoscaling make it both practical and pleasing.
+Fast, elegant, real‑time system monitor for desktop. Built with PySide6 + psutil. Clean dark UI, smooth charts, per‑core CPU, processes view, and optional NVIDIA GPU metrics.
 
-> Why another monitor? This project aims to be a compact, hackable example of a real‑time Qt app: easy to run, easy to read, and easy to extend. If you want to learn PySide6/Qt or contribute performance/UX ideas, you’re in the right place!
-
-
-## Features
-
-- Dark, polished UI with compact “metric cards” and time‑series charts
-- Live dashboard with CPU, memory, network, disk, and GPU at a glance
-- Per‑core CPU charts arranged as small multiples with distinct colors
-- Processes tab (user‑adjustable column widths) showing Top‑N by CPU%
-- GPU utilization via NVML (pynvml) or a background `nvidia-smi` fallback
-- User‑configurable global update interval (in milliseconds) from the toolbar
-- Network/Disk throughput unit switcher (MB/s vs MiB/s) with clear formulas displayed in the UI
-- Thoughtful performance choices: monotonic timing, dynamic baselines with time‑constant decay, background GPU polling
+快速、优雅的桌面实时系统监视器。基于 PySide6 与 psutil，深色主题、流畅曲线、按核心显示 CPU、进程视图，并可选支持 NVIDIA GPU 指标。
 
 
-## Quick start
+## Screenshots | 截图
 
-Prerequisites:
-- Python 3.9+ recommended
-- Works on Linux, Windows, and macOS (GPU metrics require NVIDIA tooling and may be unavailable on macOS/Apple Silicon)
+![Main](screenshots/main.png)
+![CPU](screenshots/cpu.png)
+![Processes](screenshots/process.png)
 
-Install dependencies:
+
+## Features | 功能亮点
+
+- Dashboard cards + time‑series charts for CPU / Memory / Network / Disk / GPU
+- Separate per‑core CPU mini‑charts with distinct colors
+- Processes tab (PID, Name, CPU%, Mem%, Threads) with adjustable columns
+- User‑configurable global update interval (ms) from the toolbar
+- Unit switcher for throughput: MB/s or MiB/s (formulas shown in UI)
+- Non‑blocking GPU stats via NVML or background `nvidia-smi`
+
+- 总览卡片 + 曲线图，覆盖 CPU / 内存 / 网络 / 磁盘 / GPU
+- 按核心分离的 CPU 小图，每个核心不同颜色
+- 进程页（PID、名称、CPU%、内存%、线程数），列宽可调整
+- 工具栏可配置全局更新间隔（毫秒）
+- 网络/磁盘速率单位可切换：MB/s 或 MiB/s（UI 显示换算公式）
+- GPU 指标使用 NVML 或后台 `nvidia-smi`，不会阻塞界面
+
+
+## Install & Run | 安装与运行
+
+- Python 3.9+
+- Linux / Windows / macOS 均可（GPU 指标需 NVIDIA 工具；在 macOS/Apple Silicon 上可能不可用）
+
+Install 依赖：
 
 ```bash
 pip install -r requirements.txt
-# Optional for NVIDIA GPU metrics (NVML):
-pip install pynvml
+# Optional (可选，NVML 绑定):
+pip install nvidia-ml-py
 ```
 
-Run the app:
+Run 运行：
 
 ```bash
 python play.py
 ```
 
-Tip: The window title shows the current update interval. Use the toolbar spin box to change it at runtime.
 
+## Usage tips | 使用提示
 
-## Using the app
-
-- Dashboard tab: High‑level cards with values, progress bars, and compact sparklines
-- CPU tab: Overall CPU chart plus a scrollable grid of per‑core charts; summary labels show process/thread counts and Python asyncio task count
-- Memory, Network, Disk tabs: Time‑series charts; Network/Disk tabs include a unit selector (MB/s or MiB/s) and display the conversion formulas right in the UI
+- Update interval: use the toolbar spin box. Window title shows current ms.
+- Units (MB/s vs MiB/s): switch in Network/Disk tabs. Formulas shown in UI:
   - MB/s = bytes/s ÷ 1,000,000
   - MiB/s = bytes/s ÷ 1,048,576
-- GPU tab: Per‑GPU utilization series when available (via NVML or `nvidia-smi`)
-- Processes tab: Top processes by CPU% (PID, Name, CPU%, Mem%, Threads); column widths are adjustable
+- CPU: per‑core charts live in the CPU tab; summary shows processes/threads and Python asyncio task count.
+- Processes: Top by CPU%. Column widths are user‑adjustable.
+
+- 更新间隔：工具栏微调框设置，标题显示当前毫秒值。
+- 单位（MB/s 与 MiB/s）：在 网络/磁盘 页切换。UI 内显示换算公式：
+  - MB/s = 字节/秒 ÷ 1,000,000
+  - MiB/s = 字节/秒 ÷ 1,048,576
+- CPU：CPU 页包含每核心小图；底部显示进程/线程与 Python 协程数量。
+- 进程：按 CPU% 排序显示前列，列宽可自由调整。
 
 
-## GPU metrics
+## Contributing | 参与贡献
 
-The app prefers NVML (via `pynvml`) for low‑latency GPU stats. If NVML isn’t available but `nvidia-smi` exists on your system, a lightweight background thread polls `nvidia-smi` at a safe interval and feeds cached values to the UI.
-
-- Install NVML Python bindings: `pip install pynvml`
-- Ensure `nvidia-smi` is on your PATH if relying on the fallback (Linux/Windows with NVIDIA drivers)
-- If no NVIDIA GPU or tools are present, the GPU tab will indicate that metrics are unavailable
+PRs welcome! Fork → branch → change → PR with a short description.
+欢迎提 PR！Fork → 新分支 → 修改 → 提交 PR，并附简要说明。
 
 
-## Project structure
+## License | 许可证
 
-```
-python_playground/
-├── play.py            # Main application (UI, charts, metrics, GPU provider)
-└── requirements.txt   # Runtime dependencies (pynvml optional)
-```
-
-Key components (all in `play.py` for simplicity):
-- `GPUProvider`: Abstraction over NVML and `nvidia-smi` with cached background polling
-- `TimeSeriesChart`: Reusable QtCharts wrapper for efficient live plotting
-- `MetricCard`: Compact card with value, bar, and optional sparkline
-- `SystemMonitor`: Main window; builds tabs, wires inputs, and runs the update loop
-
-
-## Contributing
-
-Contributions are very welcome! You can help by fixing bugs, improving performance, polishing UX, or adding features. Here’s how to get started:
-
-1. Fork the repository and create a feature branch
-2. Set up a virtual environment and install deps with `pip install -r requirements.txt`
-3. Run the app with `python play.py` and verify your changes locally
-4. Write clear commit messages and open a pull request describing the change and rationale
-
-Good first contribution ideas:
-- Add a settings panel to persist preferences (interval, history length, antialiasing, autoscale toggles)
-- Replace sparkline cards with a lightweight custom `QWidget` to reduce chart overhead
-- Aggregate Network view (total across interfaces) vs per‑interface toggle
-- Disk per‑device throughput and filesystem usage charts
-- Alert thresholds (color changes or notifications above user‑defined limits)
-- CSV logging and snapshot/export of charts
-- AMD/Intel GPU support (e.g., `rocm-smi` or platform APIs), with graceful fallbacks
-
-Code style and tips:
-- Keep UI updates on the GUI thread; do background polling in threads and pass results via cached state or signals
-- Favor monotonic timers (`QElapsedTimer`) and avoid blocking calls in `on_timer`
-- When adding charts, use bounded history and `series.replace()` for efficiency
-
-If you’re unsure where to start, open an issue—we’re happy to help scope a task.
-
-
-## Troubleshooting
-
-- "Module not found: psutil" or "PySide6": Install dependencies with `pip install -r requirements.txt`
-- GPU tab shows "metrics unavailable": Install `pynvml` or ensure `nvidia-smi` is present; otherwise GPU monitoring may not be supported on your system
-- High CPU usage: Increase the update interval via the toolbar (e.g., 50–200 ms) and reduce history length if you add new charts
-
-
-## Roadmap
-
-- Preferences dialog with persisted settings
-- Per‑device disk and per‑interface network breakdowns
-- Export/snapshot & CSV logging
-- Custom lightweight sparkline widget
-- Optional alerts and thresholds
-- Broader GPU support beyond NVIDIA
-
-
-## License
-
-No explicit license is provided yet. If you plan to reuse or distribute this code, please open an issue to discuss licensing, or propose a license via PR.
-
-
-## Acknowledgements
-
-- Built with [PySide6](https://doc.qt.io/qtforpython/) (Qt for Python) and [psutil](https://psutil.readthedocs.io/)
-- Optional GPU metrics via [pynvml](https://github.com/nvidia/pynvml) and NVIDIA's `nvidia-smi`
-
-
-## Screenshots
-
-Screenshots help people discover and trust your project. If you capture some nice shots or short GIFs, please add them here! (Tip: dark background + a busy system shows the charts nicely.)
+No license specified yet. Open an issue or PR if you need one.
+尚未指定许可证，如有需求请提 Issue 或 PR 讨论。
