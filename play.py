@@ -13,8 +13,9 @@ Run:
   python play.py
 
 Notes:
-- Updates every 1 ms by default.
+- Updates every 100 ms by default (configurable via toolbar).
 - Uses QtCharts for efficient, built-in plotting (no extra plotting libs required).
+- Keyboard shortcuts: P=Pause, R=Resume, Esc=Quit
 """
 from __future__ import annotations
 
@@ -26,8 +27,6 @@ import subprocess
 import threading
 import asyncio
 import math
-from dataclasses import dataclass
-from email.policy import default
 from typing import List, Optional, Tuple
 
 try:
@@ -37,8 +36,8 @@ except Exception as e:
     raise
 
 # PySide6 imports
-from PySide6.QtCore import Qt, QTimer, QPointF, QMargins, QElapsedTimer
-from PySide6.QtGui import QFont, QPalette, QColor, QPainter
+from PySide6.QtCore import Qt, QTimer, QPointF, QMargins, QElapsedTimer, Signal, QObject
+from PySide6.QtGui import QPalette, QColor, QPainter, QKeySequence, QAction
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -59,11 +58,185 @@ from PySide6.QtWidgets import (
     QSpinBox,
     QToolBar,
     QScrollArea,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QLineEdit,
+    QPushButton,
 )
 from PySide6.QtCharts import QChart, QChartView, QLineSeries, QValueAxis
 
 
+# ----------------------------- Helper Functions -----------------------------
+def get_cpu_model_name() -> str:
+    """Get CPU model/brand name."""
+    try:
+        # Try platform-specific methods first (more reliable than platform.processor())
+        
+        # Linux: read from /proc/cpuinfo
+        if platform.system() == "Linux":
+            try:
+                with open("/proc/cpuinfo", "r") as f:
+                    for line in f:
+                        if "model name" in line.lower():
+                            model = line.split(":", 1)[1].strip()
+                            if model and not model.startswith("x86"):  # Avoid architecture strings
+                                return model
+            except Exception:
+                pass
+        
+        # macOS: use sysctl
+        if platform.system() == "Darwin":
+            try:
+                result = subprocess.run(
+                    ["sysctl", "-n", "machdep.cpu.brand_string"],
+                    capture_output=True,
+                    text=True,
+                    timeout=1.0
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    return result.stdout.strip()
+            except Exception:
+                pass
+        
+        # Windows: use wmic
+        if platform.system() == "Windows":
+            try:
+                result = subprocess.run(
+                    ["wmic", "cpu", "get", "name"],
+                    capture_output=True,
+                    text=True,
+                    timeout=1.5
+                )
+                if result.returncode == 0:
+                    lines = result.stdout.strip().split("\n")
+                    if len(lines) > 1 and lines[1].strip():
+                        return lines[1].strip()
+            except Exception:
+                pass
+        
+        # Fallback: try platform.processor() (may return architecture on some systems)
+        proc = platform.processor()
+        if proc and proc.strip() and not proc.strip().lower() in ["x86_64", "i386", "i686", "amd64", "arm64", "aarch64"]:
+            return proc.strip()
+        
+        # Final fallback
+        return f"{platform.machine()} CPU"
+    except Exception:
+        return "Unknown CPU"
+
+
+def get_per_core_frequencies() -> List[float]:
+    """Get per-core CPU frequencies in MHz. Returns empty list if not available."""
+    try:
+        # Try psutil per-core frequencies (supported on some systems)
+        if hasattr(psutil, 'cpu_freq') and callable(psutil.cpu_freq):
+            freq = psutil.cpu_freq(percpu=True)
+            if freq and isinstance(freq, list):
+                return [f.current for f in freq if hasattr(f, 'current')]
+        return []
+    except Exception:
+        return []
+
+
+def get_memory_frequency() -> float:
+    """Get RAM frequency in MHz. Returns 0 if not available."""
+    try:
+        # Linux: try reading from dmidecode (requires root)
+        if platform.system() == "Linux":
+            try:
+                result = subprocess.run(
+                    ["dmidecode", "-t", "memory"],
+                    capture_output=True,
+                    text=True,
+                    timeout=2.0
+                )
+                if result.returncode == 0:
+                    for line in result.stdout.split("\n"):
+                        if "Speed:" in line and "MHz" in line:
+                            # Extract first speed value found
+                            parts = line.split(":")
+                            if len(parts) > 1:
+                                speed_str = parts[1].strip().split()[0]
+                                return float(speed_str)
+            except Exception:
+                pass
+        
+        # Windows: use wmic
+        if platform.system() == "Windows":
+            try:
+                result = subprocess.run(
+                    ["wmic", "memorychip", "get", "speed"],
+                    capture_output=True,
+                    text=True,
+                    timeout=2.0
+                )
+                if result.returncode == 0:
+                    lines = result.stdout.strip().split("\n")
+                    if len(lines) > 1:
+                        speed_str = lines[1].strip()
+                        if speed_str.isdigit():
+                            return float(speed_str)
+            except Exception:
+                pass
+        
+        return 0.0
+    except Exception:
+        return 0.0
+
+
+def get_cpu_temperatures() -> List[Tuple[str, float]]:
+    """Get CPU temperature sensors. Returns list of (label, temp_celsius) tuples."""
+    try:
+        if hasattr(psutil, "sensors_temperatures"):
+            temps = psutil.sensors_temperatures()
+            if temps:
+                cpu_temps = []
+                # Look for common CPU temperature sensor names
+                for name in ["coretemp", "k10temp", "cpu_thermal", "cpu-thermal"]:
+                    if name in temps:
+                        for entry in temps[name]:
+                            if entry.current > 0:
+                                cpu_temps.append((entry.label or name, entry.current))
+                return cpu_temps
+        return []
+    except Exception:
+        return []
+
+
+def get_gpu_temperatures(gpu_provider) -> List[float]:
+    """Get GPU temperatures in Celsius. Returns list of temperatures for each GPU."""
+    try:
+        if gpu_provider.method == "nvml" and gpu_provider._nvml is not None:
+            temps = []
+            for h in gpu_provider._nvml_handles:
+                try:
+                    temp = gpu_provider._nvml.nvmlDeviceGetTemperature(h, gpu_provider._nvml.NVML_TEMPERATURE_GPU)
+                    temps.append(float(temp))
+                except Exception:
+                    temps.append(0.0)
+            return temps
+        elif gpu_provider.method == "nvidia-smi":
+            # Query via nvidia-smi
+            cmd = [
+                "nvidia-smi",
+                "--query-gpu=temperature.gpu",
+                "--format=csv,noheader,nounits",
+            ]
+            out = subprocess.run(cmd, capture_output=True, text=True, timeout=1.5)
+            temps = []
+            for line in out.stdout.strip().splitlines():
+                try:
+                    temps.append(float(line.strip()))
+                except Exception:
+                    temps.append(0.0)
+            return temps
+        return []
+    except Exception:
+        return []
+
+
 def apply_dark_theme(app: QApplication) -> None:
+    """Apply modern dark theme with enhanced aesthetics."""
     app.setStyle("Fusion")
     palette = QPalette()
     palette.setColor(QPalette.Window, QColor(18, 18, 18))
@@ -82,20 +255,133 @@ def apply_dark_theme(app: QApplication) -> None:
     app.setStyleSheet(
         """
         QWidget { background-color: #121212; color: #e0e0e0; }
-        QFrame#Card { background-color: #1e1e1e; border: 1px solid #2a2a2a; border-radius: 10px; }
-        QLabel#Title { font-weight: 600; font-size: 13pt; color: #cfcfcf; }
-        QLabel#Value { font-weight: 700; font-size: 20pt; color: #ffffff; }
-        QProgressBar { background-color: #2a2a2a; border: 1px solid #3a3a3a; border-radius: 6px; height: 14px; }
-        QProgressBar::chunk { background-color: #00c853; border-radius: 6px; }
-        QTabWidget::pane { border: 1px solid #2a2a2a; }
-        QTabBar::tab { background: #1e1e1e; padding: 6px 12px; border: 1px solid #2a2a2a; border-bottom: none; }
-        QTabBar::tab:selected { background: #2a2a2a; }
+        QMainWindow { background-color: #0d0d0d; }
+        
+        /* Enhanced card design with depth */
+        QFrame#Card { 
+            background-color: #1e1e1e; 
+            border: 1px solid #333333; 
+            border-radius: 12px;
+            padding: 4px;
+        }
+        QFrame#Card:hover {
+            border: 1px solid #404040;
+            background-color: #232323;
+        }
+        
+        /* Typography improvements */
+        QLabel#Title { 
+            font-weight: 600; 
+            font-size: 12pt; 
+            color: #b0b0b0;
+            letter-spacing: 0.5px;
+        }
+        QLabel#Value { 
+            font-weight: 700; 
+            font-size: 22pt; 
+            color: #ffffff;
+            letter-spacing: 0.3px;
+        }
+        
+        /* Enhanced progress bars */
+        QProgressBar { 
+            background-color: #1a1a1a; 
+            border: 1px solid #2a2a2a; 
+            border-radius: 7px; 
+            height: 16px;
+            text-align: center;
+        }
+        QProgressBar::chunk { 
+            background-color: #00c853; 
+            border-radius: 6px;
+        }
+        
+        /* Toolbar styling */
+        QToolBar {
+            background-color: #1a1a1a;
+            border-bottom: 2px solid #2a2a2a;
+            spacing: 8px;
+            padding: 8px;
+        }
+        QToolBar QLabel {
+            color: #b0b0b0;
+            font-size: 10pt;
+            padding: 0 4px;
+        }
+        QToolBar QSpinBox {
+            background-color: #252525;
+            border: 1px solid #3a3a3a;
+            border-radius: 4px;
+            padding: 4px 8px;
+            color: #e0e0e0;
+            min-width: 80px;
+        }
+        QToolBar QPushButton {
+            background-color: #2a2a2a;
+            border: 1px solid #3a3a3a;
+            border-radius: 4px;
+            padding: 6px 12px;
+            color: #e0e0e0;
+            font-weight: 500;
+        }
+        QToolBar QPushButton:hover {
+            background-color: #333333;
+            border: 1px solid #4a4a4a;
+        }
+        QToolBar QPushButton:pressed {
+            background-color: #202020;
+        }
+        QToolBar QPushButton#PauseButton {
+            background-color: #1976d2;
+            border: 1px solid #2196f3;
+        }
+        QToolBar QPushButton#PauseButton:hover {
+            background-color: #2196f3;
+        }
+        
+        /* Tab improvements */
+        QTabWidget::pane { 
+            border: 1px solid #2a2a2a;
+            background-color: #141414;
+            top: -1px;
+        }
+        QTabBar::tab { 
+            background: #1a1a1a; 
+            padding: 8px 16px; 
+            border: 1px solid #2a2a2a; 
+            border-bottom: none;
+            border-top-left-radius: 6px;
+            border-top-right-radius: 6px;
+            margin-right: 2px;
+        }
+        QTabBar::tab:selected { 
+            background: #2a2a2a;
+            border-bottom: 2px solid #3584e4;
+        }
+        QTabBar::tab:hover:!selected {
+            background: #222222;
+        }
+        
+        /* Table styling */
+        QTableWidget {
+            background-color: #1a1a1a;
+            alternate-background-color: #1e1e1e;
+            gridline-color: #2a2a2a;
+            selection-background-color: #3584e4;
+        }
+        QHeaderView::section {
+            background-color: #252525;
+            color: #b0b0b0;
+            padding: 6px;
+            border: 1px solid #2a2a2a;
+            font-weight: 600;
+        }
         """
     )
 
 # ----------------------------- GPU Provider -----------------------------
 class GPUProvider:
-    """Provides GPU names and utilization percentages.
+    """Provides GPU names, utilization, VRAM, and frequency.
     Tries nvidia-ml-py first; falls back to calling nvidia-smi if available.
     """
 
@@ -106,6 +392,8 @@ class GPUProvider:
         self._nvml_handles = []
         self._last_smi_time: float = 0.0
         self._last_smi_utils: List[float] = []
+        self._last_smi_vram: List[Tuple[float, float]] = []  # (used_mb, total_mb) per GPU
+        self._last_smi_freq: List[float] = []  # current freq in MHz per GPU
         self._smi_min_interval = 1.0  # seconds; avoid hammering nvidia-smi; polled in background thread
 
         # Try NVML (pynvml)
@@ -134,6 +422,8 @@ class GPUProvider:
                 if names:
                     self._gpu_names = names
                     self._last_smi_utils = [0.0 for _ in names]
+                    self._last_smi_vram = [(0.0, 0.0) for _ in names]
+                    self._last_smi_freq = [0.0 for _ in names]
                     self.method = "nvidia-smi"
                     # Start background polling thread to avoid UI blocking
                     self._smi_stop = False
@@ -167,6 +457,41 @@ class GPUProvider:
                 utils.append(0.0)
         return utils
 
+    def _query_nvidia_smi_vram(self) -> List[Tuple[float, float]]:
+        """Query VRAM usage (used, total) in MB via nvidia-smi."""
+        cmd = [
+            "nvidia-smi",
+            "--query-gpu=memory.used,memory.total",
+            "--format=csv,noheader,nounits",
+        ]
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=1.5)
+        vram: List[Tuple[float, float]] = []
+        for line in out.stdout.strip().splitlines():
+            try:
+                parts = line.strip().split(",")
+                used = float(parts[0].strip())
+                total = float(parts[1].strip())
+                vram.append((used, total))
+            except Exception:
+                vram.append((0.0, 0.0))
+        return vram
+
+    def _query_nvidia_smi_freq(self) -> List[float]:
+        """Query GPU clock frequency in MHz via nvidia-smi."""
+        cmd = [
+            "nvidia-smi",
+            "--query-gpu=clocks.current.graphics",
+            "--format=csv,noheader,nounits",
+        ]
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=1.5)
+        freqs: List[float] = []
+        for line in out.stdout.strip().splitlines():
+            try:
+                freqs.append(float(line.strip()))
+            except Exception:
+                freqs.append(0.0)
+        return freqs
+
     def gpu_names(self) -> List[str]:
         return list(self._gpu_names)
 
@@ -186,6 +511,40 @@ class GPUProvider:
         else:
             return []
 
+    def gpu_vram_info(self) -> List[Tuple[float, float]]:
+        """Returns list of (used_mb, total_mb) tuples for each GPU."""
+        if self.method == "nvml" and self._nvml is not None:
+            vram_list: List[Tuple[float, float]] = []
+            for h in self._nvml_handles:
+                try:
+                    mem_info = self._nvml.nvmlDeviceGetMemoryInfo(h)
+                    used_mb = mem_info.used / (1024 * 1024)
+                    total_mb = mem_info.total / (1024 * 1024)
+                    vram_list.append((used_mb, total_mb))
+                except Exception:
+                    vram_list.append((0.0, 0.0))
+            return vram_list
+        elif self.method == "nvidia-smi":
+            return list(self._last_smi_vram)
+        else:
+            return []
+
+    def gpu_frequencies(self) -> List[float]:
+        """Returns list of current GPU clock frequencies in MHz."""
+        if self.method == "nvml" and self._nvml is not None:
+            freqs: List[float] = []
+            for h in self._nvml_handles:
+                try:
+                    freq_mhz = self._nvml.nvmlDeviceGetClockInfo(h, self._nvml.NVML_CLOCK_GRAPHICS)
+                    freqs.append(float(freq_mhz))
+                except Exception:
+                    freqs.append(0.0)
+            return freqs
+        elif self.method == "nvidia-smi":
+            return list(self._last_smi_freq)
+        else:
+            return []
+
     def _smi_poll_loop(self) -> None:
         # Background polling loop for nvidia-smi to avoid blocking the UI thread
         while True:
@@ -193,6 +552,12 @@ class GPUProvider:
                 utils = self._query_nvidia_smi_utils()
                 if utils:
                     self._last_smi_utils = utils
+                vram = self._query_nvidia_smi_vram()
+                if vram:
+                    self._last_smi_vram = vram
+                freq = self._query_nvidia_smi_freq()
+                if freq:
+                    self._last_smi_freq = freq
             except Exception:
                 # swallow exceptions; next iteration will retry
                 pass
@@ -295,10 +660,11 @@ class TimeSeriesChart(QWidget):
 
 # --------------------------- Main Window --------------------------------
 class MetricCard(QWidget):
-    def __init__(self, title: str, unit: str = "", is_percent: bool = False, color: str = "#00c853", sparkline: bool = True, max_points: int = 120) -> None:
+    def __init__(self, title: str, unit: str = "", is_percent: bool = False, color: str = "#00c853", sparkline: bool = True, max_points: int = 60) -> None:
         super().__init__()
         self.is_percent = is_percent
         self.unit = unit
+        self.color = color  # Store original color for reset
         self._dyn_max: float = 10.0 if not is_percent else 100.0
 
         outer = QVBoxLayout(self)
@@ -317,6 +683,18 @@ class MetricCard(QWidget):
         self.lbl_value.setObjectName("Value")
         v.addWidget(self.lbl_title)
         v.addWidget(self.lbl_value)
+
+        # Optional labels for frequency and model name
+        self.lbl_frequency = QLabel("")
+        self.lbl_frequency.setStyleSheet("QLabel { color: #909090; font-size: 9pt; }")
+        self.lbl_frequency.setVisible(False)
+        v.addWidget(self.lbl_frequency)
+        
+        self.lbl_model = QLabel("")
+        self.lbl_model.setStyleSheet("QLabel { color: #808080; font-size: 8pt; font-style: italic; }")
+        self.lbl_model.setWordWrap(True)
+        self.lbl_model.setVisible(False)
+        v.addWidget(self.lbl_model)
 
         self.bar = QProgressBar()
         self.bar.setTextVisible(False)
@@ -349,13 +727,42 @@ class MetricCard(QWidget):
         self.lbl_value.setText(message)
         self.bar.setValue(0)
 
+    def set_frequency(self, freq_mhz: float) -> None:
+        """Set frequency display in MHz."""
+        if freq_mhz > 0:
+            self.lbl_frequency.setText(f"⚡ {freq_mhz:.0f} MHz")
+            self.lbl_frequency.setVisible(True)
+        else:
+            self.lbl_frequency.setVisible(False)
+
+    def set_model(self, model_name: str) -> None:
+        """Set model/brand name display."""
+        if model_name and model_name.strip():
+            self.lbl_model.setText(f"🔹 {model_name.strip()}")
+            self.lbl_model.setVisible(True)
+        else:
+            self.lbl_model.setVisible(False)
+
     def update_percent(self, pct: float) -> None:
+        """Update percentage value with warning colors for high usage."""
         try:
             pct_f = max(0.0, min(100.0, float(pct)))
         except Exception:
             pct_f = 0.0
         self.lbl_value.setText(f"{pct_f:.1f} %")
         self.bar.setValue(int(round(pct_f)))
+        
+        # Apply warning colors for high resource usage
+        if pct_f >= 90.0:
+            # Critical: red
+            self.bar.setStyleSheet(f"QProgressBar::chunk{{background-color:#f44336; border-radius:6px;}}")
+        elif pct_f >= 80.0:
+            # Warning: orange
+            self.bar.setStyleSheet(f"QProgressBar::chunk{{background-color:#ff9800; border-radius:6px;}}")
+        else:
+            # Normal: original color
+            self.bar.setStyleSheet(f"QProgressBar::chunk{{background-color:{self.color}; border-radius:6px;}}")
+        
         if self.sparkline is not None:
             self.sparkline.append([pct_f])
 
@@ -380,17 +787,20 @@ class MetricCard(QWidget):
 
 
 class SystemMonitor(QMainWindow):
-    def __init__(self, interval_ms: int = 1) -> None:
+    def __init__(self, interval_ms: int = 100) -> None:
         super().__init__()
         self.interval_ms = interval_ms
         self.setWindowTitle(f"System Monitor ({self.interval_ms} ms)")
         self.resize(1200, 800)
         self.gpu_provider = GPUProvider()
+        self._paused = False  # Track pause state
 
         # Toolbar for global controls
         toolbar = self.addToolBar("Controls")
         toolbar.setMovable(False)
         toolbar.setFloatable(False)
+        
+        # Update interval control
         toolbar_lbl = QLabel("Update interval (ms):")
         toolbar_lbl.setStyleSheet("QLabel { color: #b0b0b0; }")
         self.spin_interval = QSpinBox()
@@ -401,6 +811,34 @@ class SystemMonitor(QMainWindow):
         toolbar.addWidget(toolbar_lbl)
         toolbar.addWidget(self.spin_interval)
         self.spin_interval.valueChanged.connect(self.on_interval_changed)
+        
+        # Add separator
+        toolbar.addSeparator()
+        
+        # GPU refresh interval control
+        toolbar.addWidget(QLabel("GPU refresh (ms):"))
+        self.spin_gpu_refresh = QSpinBox()
+        self.spin_gpu_refresh.setRange(100, 5000)
+        self.spin_gpu_refresh.setValue(100)
+        self.spin_gpu_refresh.setToolTip("GPU metrics update interval in milliseconds")
+        toolbar.addWidget(self.spin_gpu_refresh)
+        
+        # Process refresh interval control
+        toolbar.addWidget(QLabel("Process refresh (ms):"))
+        self.spin_proc_refresh = QSpinBox()
+        self.spin_proc_refresh.setRange(100, 5000)
+        self.spin_proc_refresh.setValue(100)
+        self.spin_proc_refresh.setToolTip("Process table update interval in milliseconds")
+        toolbar.addWidget(self.spin_proc_refresh)
+        
+        toolbar.addSeparator()
+        
+        # Pause/Resume button
+        self.btn_pause = QPushButton("⏸ Pause")
+        self.btn_pause.setObjectName("PauseButton")
+        self.btn_pause.setToolTip("Pause/Resume monitoring (Shortcut: P)")
+        self.btn_pause.clicked.connect(self.toggle_pause)
+        toolbar.addWidget(self.btn_pause)
 
         # Tabs
         tabs = QTabWidget()
@@ -413,15 +851,28 @@ class SystemMonitor(QMainWindow):
         grid.setSpacing(12)
 
         self.card_cpu = MetricCard("CPU", unit="%", is_percent=True, color="#00c853")
+        self.card_cpu.set_tooltip("Overall CPU utilization across all cores")
+        # Set CPU model name (once during initialization)
+        cpu_model = get_cpu_model_name()
+        self.card_cpu.set_model(cpu_model)
         self.card_mem = MetricCard("Memory", unit="%", is_percent=True, color="#ffd54f")
+        self.card_mem.set_tooltip("Physical memory (RAM) usage")
         self.card_net_up = MetricCard("Net Up", unit="MiB/s", is_percent=False, color="#2962ff")
+        self.card_net_up.set_tooltip("Network upload throughput")
         self.card_net_down = MetricCard("Net Down", unit="MiB/s", is_percent=False, color="#ff5252")
+        self.card_net_down.set_tooltip("Network download throughput")
         self.card_disk_read = MetricCard("Disk Read", unit="MiB/s", is_percent=False, color="#00bcd4")
+        self.card_disk_read.set_tooltip("Disk read throughput")
         self.card_disk_write = MetricCard("Disk Write", unit="MiB/s", is_percent=False, color="#ab47bc")
+        self.card_disk_write.set_tooltip("Disk write throughput")
         gpu_names_dash = self.gpu_provider.gpu_names()
         self.card_gpu = MetricCard("GPU", unit="%", is_percent=True, color="#7c4dff")
         if not gpu_names_dash:
             self.card_gpu.set_unavailable("N/A")
+            self.card_gpu.set_tooltip("No NVIDIA GPU detected")
+        else:
+            # Set GPU model name (first GPU if multiple)
+            self.card_gpu.set_model(gpu_names_dash[0])
 
         grid.addWidget(self.card_cpu, 0, 0)
         grid.addWidget(self.card_mem, 0, 1)
@@ -454,9 +905,10 @@ class SystemMonitor(QMainWindow):
         cpu_tab = QWidget()
         cpu_l = QVBoxLayout(cpu_tab)
         cpu_l.addWidget(self.chart_cpu)
-        # Per-core CPU charts (separate small multiples)
+        # Per-core CPU charts (separate small multiples with frequency labels)
         n_cores = psutil.cpu_count(logical=True) or 1
         self.core_charts: List[TimeSeriesChart] = []
+        self.core_freq_labels: List[QLabel] = []  # Store frequency labels for updates
         cores_container = QWidget()
         cores_grid = QGridLayout(cores_container)
         cores_grid.setSpacing(8)
@@ -467,7 +919,16 @@ class SystemMonitor(QMainWindow):
             QColor("#00897b"), QColor("#43a047"), QColor("#fdd835"), QColor("#fb8c00"),
             QColor("#6d4c41"), QColor("#546e7a"), QColor("#d81b60"), QColor("#00acc1"),
         ]
+        small_style = "QLabel { color: #b0b0b0; font-size: 8pt; }"
+        
         for i in range(n_cores):
+            # Create a container for each core (chart + frequency label)
+            core_container = QWidget()
+            core_layout = QVBoxLayout(core_container)
+            core_layout.setContentsMargins(0, 0, 0, 0)
+            core_layout.setSpacing(2)
+            
+            # Create the chart
             chart = TimeSeriesChart(f"CPU{i}", ["%"], max_points=200, y_range=(0, 100))
             # Apply distinct color to this core's series
             if chart.series:
@@ -477,25 +938,50 @@ class SystemMonitor(QMainWindow):
             chart.axis_y.setVisible(False)
             chart.chart.setMargins(QMargins(4, 4, 4, 4))
             self.core_charts.append(chart)
+            core_layout.addWidget(chart)
+            
+            # Create frequency label
+            freq_label = QLabel("-- MHz")
+            freq_label.setStyleSheet(small_style)
+            freq_label.setAlignment(Qt.AlignCenter)
+            self.core_freq_labels.append(freq_label)
+            core_layout.addWidget(freq_label)
+            
             r, c = divmod(i, cols)
-            cores_grid.addWidget(chart, r, c)
+            cores_grid.addWidget(core_container, r, c)
+        
         # Wrap core charts in a scroll area for many-core systems
         scroll = QScrollArea()
         scroll.setWidget(cores_container)
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
         cpu_l.addWidget(scroll)
+        
+        # Define small style for labels
+        small_style = "QLabel { color: #b0b0b0; font-size: 9pt; }"
+        
         # Summary labels for processes/threads/coroutines
         self.lbl_proc_summary = QLabel("")
         self.lbl_asyncio = QLabel("")
-        small_style = "QLabel { color: #b0b0b0; font-size: 9pt; }"
         self.lbl_proc_summary.setStyleSheet(small_style)
         self.lbl_asyncio.setStyleSheet(small_style)
         summary_row = QHBoxLayout()
         summary_row.addWidget(self.lbl_proc_summary)
         summary_row.addWidget(self.lbl_asyncio)
         cpu_l.addLayout(summary_row)
-        mem_tab = QWidget(); mem_l = QVBoxLayout(mem_tab); mem_l.addWidget(self.chart_mem)
+        
+        # Memory tab with frequency display
+        mem_tab = QWidget()
+        mem_l = QVBoxLayout(mem_tab)
+        mem_l.addWidget(self.chart_mem)
+        # Add memory frequency info if available
+        mem_freq = get_memory_frequency()
+        if mem_freq > 0:
+            self.lbl_mem_freq = QLabel(f"RAM Frequency: {mem_freq:.0f} MHz")
+            self.lbl_mem_freq.setStyleSheet(small_style)
+            mem_l.addWidget(self.lbl_mem_freq)
+        else:
+            self.lbl_mem_freq = None
         net_tab = QWidget()
         net_l = QVBoxLayout(net_tab)
         # Unit selector row for Network
@@ -529,12 +1015,51 @@ class SystemMonitor(QMainWindow):
         tabs.addTab(net_tab, "Network")
         tabs.addTab(disk_tab, "Disk")
         if self.chart_gpu is not None:
-            gpu_tab = QWidget(); gpu_l = QVBoxLayout(gpu_tab); gpu_l.addWidget(self.chart_gpu)
+            gpu_tab = QWidget()
+            gpu_l = QVBoxLayout(gpu_tab)
+            gpu_l.addWidget(self.chart_gpu)
+            
+            # GPU VRAM chart with fixed y-axis based on max total VRAM
+            vram_info = self.gpu_provider.gpu_vram_info()
+            max_vram = 1000.0  # Default fallback
+            if vram_info:
+                # Find the maximum total VRAM across all GPUs
+                max_vram = max((total_mb for _, total_mb in vram_info if total_mb > 0), default=1000.0)
+            self.chart_gpu_vram = TimeSeriesChart(
+                "GPU VRAM Usage (MB)",
+                [f"{name} VRAM" for name in gpu_names],
+                max_points=400,
+                y_range=(0, max_vram),
+                auto_scale=False  # Fixed y-axis
+            )
+            gpu_l.addWidget(self.chart_gpu_vram)
+            
+            # GPU Temperature chart with fixed y-axis (0-100°C)
+            gpu_temps = get_gpu_temperatures(self.gpu_provider)
+            if gpu_temps and any(t > 0 for t in gpu_temps):
+                self.chart_gpu_temp = TimeSeriesChart(
+                    "GPU Temperature (°C)",
+                    [f"{name} Temp" for name in gpu_names],
+                    max_points=400,
+                    y_range=(0, 100),
+                    auto_scale=False  # Fixed y-axis at 100°C max
+                )
+                gpu_l.addWidget(self.chart_gpu_temp)
+            else:
+                self.chart_gpu_temp = None
+            
+            # GPU info labels
+            self.lbl_gpu_info = QLabel("")
+            self.lbl_gpu_info.setStyleSheet("QLabel { color: #b0b0b0; font-size: 9pt; padding: 8px; }")
+            gpu_l.addWidget(self.lbl_gpu_info)
             tabs.addTab(gpu_tab, "GPU")
         else:
             gpu_tab = QWidget(); gpu_l = QVBoxLayout(gpu_tab);
             gpu_l.addWidget(QLabel("No NVIDIA GPU metrics available (pynvml/nvidia-smi not found)."))
             tabs.addTab(gpu_tab, "GPU")
+            self.lbl_gpu_info = None
+            self.chart_gpu_vram = None
+            self.chart_gpu_temp = None
 
         # Wire unit selectors and init unit mode
         self.unit_combo_net.currentTextChanged.connect(self.on_unit_changed)
@@ -543,16 +1068,41 @@ class SystemMonitor(QMainWindow):
         self._bytes_per_unit = 1024**2
         self.on_unit_changed(self.unit_mode)
 
-        # Processes tab
-        self.proc_table = QTableWidget(0, 5)
-        self.proc_table.setHorizontalHeaderLabels(["PID", "Name", "CPU %", "Mem %", "Threads"])
-        hdr = self.proc_table.horizontalHeader()
+        # Processes tab with hierarchical tree (Core → Process → Threads)
+        procs_tab = QWidget()
+        procs_l = QVBoxLayout(procs_tab)
+        
+        # Search box for filtering processes
+        search_row = QHBoxLayout()
+        search_row.addWidget(QLabel("Search:"))
+        self.proc_search = QLineEdit()
+        self.proc_search.setPlaceholderText("Filter by process name or PID...")
+        self.proc_search.textChanged.connect(self.on_proc_search_changed)
+        search_row.addWidget(self.proc_search)
+        procs_l.addLayout(search_row)
+        
+        # Process tree with hierarchical view (sorting disabled to allow manual expansion)
+        self.proc_tree = QTreeWidget()
+        self.proc_tree.setHeaderLabels(["Type/Name", "PID", "CPU %", "Mem %", "Threads", "Core"])
+        self.proc_tree.setColumnCount(6)
+        self.proc_tree.setSortingEnabled(False)  # Disable sorting to prevent auto-collapse on refresh
+        hdr = self.proc_tree.header()
         hdr.setStretchLastSection(False)
         hdr.setSectionResizeMode(QHeaderView.Interactive)
-        procs_tab = QWidget(); procs_l = QVBoxLayout(procs_tab); procs_l.addWidget(self.proc_table)
+        hdr.setSectionsClickable(True)  # Keep clickable for potential future use
+        self.proc_tree.setAlternatingRowColors(True)
+        
+        # Connect itemExpanded for lazy thread loading
+        self.proc_tree.itemExpanded.connect(self.on_proc_item_expanded)
+        
+        procs_l.addWidget(self.proc_tree)
         self.tabs.addTab(procs_tab, "Processes")
+        
+        # Process filter and refresh state
+        self._proc_filter = ""
         self._proc_refresh_accum = 0.0
         self._procs_primed = False
+        self._expanded_items = {}  # Track which items have been expanded
 
         # Info tab
         self.info_edit = QTextEdit()
@@ -573,6 +1123,8 @@ class SystemMonitor(QMainWindow):
         self._last_disk = psutil.disk_io_counters()
         self._disk_dyn_read = 1.0
         self._disk_dyn_write = 1.0
+        # GPU refresh accumulator
+        self._gpu_refresh_accum = 0.0
 
         self.refresh_info()
 
@@ -580,13 +1132,30 @@ class SystemMonitor(QMainWindow):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.on_timer)
         self.timer.start(self.interval_ms)
+        
+        # Keyboard shortcuts
+        self._setup_shortcuts()
+
+    def _setup_shortcuts(self) -> None:
+        """Setup keyboard shortcuts for quick actions."""
+        # Pause/Resume: P key
+        pause_action = QAction("Pause/Resume", self)
+        pause_action.setShortcut(QKeySequence("P"))
+        pause_action.triggered.connect(self.toggle_pause)
+        self.addAction(pause_action)
+        
+        # Quit: Esc key
+        quit_action = QAction("Quit", self)
+        quit_action.setShortcut(QKeySequence("Esc"))
+        quit_action.triggered.connect(self.close)
+        self.addAction(quit_action)
 
     # ---------------------- Info builders ----------------------
     def refresh_info(self) -> None:
         lines = []
         # CPU
         lines.append("=== CPU Information ===")
-        lines.append(f"Processor: {platform.processor()}")
+        lines.append(f"Processor: {get_cpu_model_name()}")
         lines.append(f"Machine: {platform.machine()}")
         try:
             lines.append(f"Architecture: {platform.architecture()}")
@@ -674,6 +1243,7 @@ class SystemMonitor(QMainWindow):
         self._disk_dyn_write = 1.0
 
     def on_interval_changed(self, val: int) -> None:
+        """Handle update interval change from spinbox."""
         try:
             ms = int(val)
         except Exception:
@@ -686,7 +1256,60 @@ class SystemMonitor(QMainWindow):
             except Exception:
                 # Fallback in case timer not yet started
                 self.timer.start(self.interval_ms)
-            self.setWindowTitle(f"System Monitor ({self.interval_ms} ms)")
+            self._update_window_title()
+    
+    def toggle_pause(self) -> None:
+        """Toggle pause/resume state for monitoring."""
+        self._paused = not self._paused
+        if self._paused:
+            self.btn_pause.setText("▶ Resume")
+            self.btn_pause.setToolTip("Resume monitoring (Shortcut: P)")
+        else:
+            self.btn_pause.setText("⏸ Pause")
+            self.btn_pause.setToolTip("Pause monitoring (Shortcut: P)")
+        self._update_window_title()
+    
+    def _update_window_title(self) -> None:
+        """Update window title with current state."""
+        state = " [PAUSED]" if self._paused else ""
+        self.setWindowTitle(f"System Monitor ({self.interval_ms} ms){state}")
+    
+    def on_proc_search_changed(self, text: str) -> None:
+        """Handle process search filter change."""
+        self._proc_filter = text.strip().lower()
+        # Force immediate refresh if not paused
+        if not self._paused:
+            self.refresh_processes()
+    
+    def on_proc_item_expanded(self, item: QTreeWidgetItem) -> None:
+        """Lazy load thread details when a process item is expanded."""
+        # Check if this item represents a process (has PID in column 1)
+        pid_text = item.text(1)
+        if not pid_text or not pid_text.isdigit():
+            return
+        
+        # Check if already loaded
+        item_id = id(item)
+        if item_id in self._expanded_items:
+            return
+        
+        self._expanded_items[item_id] = True
+        
+        # If item already has children, they were pre-loaded
+        if item.childCount() > 0:
+            return
+        
+        # Load thread details for this process
+        try:
+            pid = int(pid_text)
+            proc = psutil.Process(pid)
+            thread_ids = proc.threads()
+            for i, thread_info in enumerate(thread_ids[:10]):  # Limit to 10 threads
+                thread_item = QTreeWidgetItem(item)
+                thread_item.setText(0, f"Thread {thread_info.id}")
+                thread_item.setText(1, str(thread_info.id))
+        except Exception:
+            pass
 
     def refresh_processes(self) -> None:
         try:
@@ -700,9 +1323,14 @@ class SystemMonitor(QMainWindow):
                 self._procs_primed = True
                 return
 
-            rows = []
+            # Collect process data
+            n_cores = psutil.cpu_count(logical=True) or 1
+            core_processes = {i: [] for i in range(n_cores)}
+            all_cores_processes = []
+            
             total_threads = 0
             proc_count = 0
+            
             for p in psutil.process_iter(['pid', 'name', 'memory_percent', 'num_threads']):
                 proc_count += 1
                 try:
@@ -712,18 +1340,108 @@ class SystemMonitor(QMainWindow):
                 mem = float(p.info.get('memory_percent') or 0.0)
                 threads = int(p.info.get('num_threads') or 0)
                 total_threads += threads
-                rows.append((cpu, p.info.get('pid'), p.info.get('name') or "", mem, threads))
-
-            rows.sort(key=lambda x: x[0], reverse=True)
-            rows = rows[:20]
-            self.proc_table.setRowCount(len(rows))
-            for r, (cpu, pid, name, mem, thr) in enumerate(rows):
-                self.proc_table.setItem(r, 0, QTableWidgetItem(str(pid)))
-                self.proc_table.setItem(r, 1, QTableWidgetItem(name))
-                self.proc_table.setItem(r, 2, QTableWidgetItem(f"{cpu:.1f}"))
-                self.proc_table.setItem(r, 3, QTableWidgetItem(f"{mem:.1f}"))
-                self.proc_table.setItem(r, 4, QTableWidgetItem(str(thr)))
-
+                pid = p.info.get('pid')
+                name = p.info.get('name') or ""
+                
+                # Apply search filter if active
+                if self._proc_filter:
+                    if self._proc_filter not in name.lower() and self._proc_filter not in str(pid):
+                        continue
+                
+                # Get CPU affinity and thread details
+                try:
+                    affinity = p.cpu_affinity()
+                    if affinity and len(affinity) < n_cores:
+                        # Process is pinned to specific cores
+                        for core_id in affinity:
+                            if core_id < n_cores:
+                                core_processes[core_id].append((cpu, pid, name, mem, threads, p))
+                    else:
+                        # Process can run on all cores
+                        all_cores_processes.append((cpu, pid, name, mem, threads, p))
+                except Exception:
+                    all_cores_processes.append((cpu, pid, name, mem, threads, p))
+            
+            # Save current expansion state before clearing
+            expanded_cores = set()
+            expanded_processes = {}  # {core_id: set(pid)}
+            
+            for i in range(self.proc_tree.topLevelItemCount()):
+                core_item = self.proc_tree.topLevelItem(i)
+                if core_item and core_item.isExpanded():
+                    # Extract core_id from text "CPU Core N"
+                    try:
+                        core_text = core_item.text(0)
+                        core_id = int(core_text.split()[-1])
+                        expanded_cores.add(core_id)
+                        
+                        # Track expanded processes under this core
+                        expanded_pids = set()
+                        for j in range(core_item.childCount()):
+                            proc_item = core_item.child(j)
+                            if proc_item and proc_item.isExpanded():
+                                pid_text = proc_item.text(1)
+                                if pid_text.isdigit():
+                                    expanded_pids.add(int(pid_text))
+                        if expanded_pids:
+                            expanded_processes[core_id] = expanded_pids
+                    except Exception:
+                        pass
+            
+            # Clear tree and rebuild
+            self.proc_tree.clear()
+            
+            # Track if this is the first time building the tree
+            first_build = not hasattr(self, "_proc_tree_built")
+            if first_build:
+                self._proc_tree_built = True
+            
+            # Add core nodes with their processes (including unpinned processes distributed to all cores)
+            for core_id in range(n_cores):
+                core_procs = core_processes[core_id]
+                
+                # Sort by CPU usage
+                core_procs.sort(key=lambda x: x[0], reverse=True)
+                
+                # Create core node
+                core_item = QTreeWidgetItem(self.proc_tree)
+                core_item.setText(0, f"CPU Core {core_id}")
+                core_item.setText(2, f"{sum(x[0] for x in core_procs[:10]):.1f}")
+                
+                # Determine if this core should be expanded
+                # First build: expand all deeply by default
+                # Subsequent builds: restore previous expansion state
+                should_expand = first_build or (core_id in expanded_cores)
+                core_item.setExpanded(should_expand)
+                
+                # Add top processes to this core (limit to 10 per core)
+                for cpu, pid, name, mem, thr, proc_obj in core_procs[:10]:
+                    proc_item = QTreeWidgetItem(core_item)
+                    proc_item.setText(0, name)
+                    proc_item.setText(1, str(pid))
+                    proc_item.setText(2, f"{cpu:.1f}")
+                    proc_item.setText(3, f"{mem:.1f}")
+                    proc_item.setText(4, str(thr))
+                    proc_item.setText(5, str(core_id))
+                    
+                    # Restore process expansion state if it was expanded before
+                    if core_id in expanded_processes and pid in expanded_processes[core_id]:
+                        proc_item.setExpanded(True)
+                        # If process was expanded, load threads immediately
+                        if thr > 1:
+                            try:
+                                thread_ids = proc_obj.threads()
+                                for thread_info in thread_ids[:10]:
+                                    thread_item = QTreeWidgetItem(proc_item)
+                                    thread_item.setText(0, f"Thread {thread_info.id}")
+                                    thread_item.setText(1, str(thread_info.id))
+                            except Exception:
+                                pass
+                    else:
+                        # Threads will be loaded lazily when user expands this item
+                        if thr > 1:
+                            proc_item.setChildIndicatorPolicy(QTreeWidgetItem.ShowIndicator)
+            
             # Update summary labels under CPU tab
             self.lbl_proc_summary.setText(f"Processes: {proc_count:,}   Threads: {total_threads:,}")
             # asyncio coroutines count (tasks)
@@ -740,6 +1458,11 @@ class SystemMonitor(QMainWindow):
 
     # ----------------------- Timer update ----------------------
     def on_timer(self) -> None:
+        # Skip updates if paused
+        if self._paused:
+            self._elapsed.restart()  # Keep timer in sync
+            return
+        
         # Use a monotonic Qt timer for consistent dt
         dt_ms = max(1, self._elapsed.restart())
         dt = dt_ms / 1000.0
@@ -747,6 +1470,13 @@ class SystemMonitor(QMainWindow):
         # CPU
         cpu = float(psutil.cpu_percent(interval=None))
         self.card_cpu.update_percent(cpu)
+        # Update CPU frequency
+        try:
+            cpu_freq = psutil.cpu_freq()
+            if cpu_freq and cpu_freq.current:
+                self.card_cpu.set_frequency(cpu_freq.current)
+        except Exception:
+            pass
         if self.tabs.currentIndex() == 1:
             self.chart_cpu.append([cpu])
             # Per-core CPU update into separate charts
@@ -757,6 +1487,16 @@ class SystemMonitor(QMainWindow):
                         self.core_charts[i].append([float(val)])
             except Exception:
                 pass
+            
+            # Update per-core frequency labels
+            if hasattr(self, "core_freq_labels") and self.core_freq_labels:
+                try:
+                    core_freqs = get_per_core_frequencies()
+                    if core_freqs:
+                        for i, freq in enumerate(core_freqs[: len(self.core_freq_labels)]):
+                            self.core_freq_labels[i].setText(f"{freq:.0f} MHz")
+                except Exception:
+                    pass
 
         # Memory
         mem = psutil.virtual_memory()
@@ -800,29 +1540,89 @@ class SystemMonitor(QMainWindow):
         if self.tabs.currentIndex() == 4:
             self.chart_disk.append([read_mbs, write_mbs])
 
-        # GPU
-        utils = self.gpu_provider.gpu_utils()
-        if utils:
-            avg = sum(utils) / len(utils)
-            self.card_gpu.update_percent(avg)
-            if self.chart_gpu is not None and self.tabs.currentIndex() == 5:
-                self.chart_gpu.append(utils)
-            # Tooltip with per-GPU details
-            names = self.gpu_provider.gpu_names()
-            tip_parts = []
-            for i, u in enumerate(utils):
-                name = names[i] if i < len(names) else f"GPU {i}"
-                tip_parts.append(f"{name}: {u:.0f}%")
-            self.card_gpu.set_tooltip(", ".join(tip_parts))
-        else:
-            self.card_gpu.set_unavailable("N/A")
+        # GPU (with configurable refresh rate)
+        try:
+            self._gpu_refresh_accum += dt
+        except Exception:
+            self._gpu_refresh_accum = 0.0
+        
+        gpu_refresh_interval = self.spin_gpu_refresh.value() / 1000.0  # Convert ms to seconds
+        if self._gpu_refresh_accum >= gpu_refresh_interval:
+            self._gpu_refresh_accum = 0.0
+            
+            utils = self.gpu_provider.gpu_utils()
+            if utils:
+                avg = sum(utils) / len(utils)
+                self.card_gpu.update_percent(avg)
+                # Update GPU frequency (first GPU if multiple)
+                freqs = self.gpu_provider.gpu_frequencies()
+                if freqs and freqs[0] > 0:
+                    self.card_gpu.set_frequency(freqs[0])
+                # Get VRAM info
+                vram_info = self.gpu_provider.gpu_vram_info()
+                
+                # Update GPU charts if on GPU tab
+                if self.chart_gpu is not None and self.tabs.currentIndex() == 5:
+                    self.chart_gpu.append(utils)
+                    
+                    # Update VRAM chart
+                    if hasattr(self, "chart_gpu_vram") and self.chart_gpu_vram is not None:
+                        vram_values = [used_mb for used_mb, _ in vram_info] if vram_info else []
+                        if vram_values:
+                            self.chart_gpu_vram.append(vram_values)
+                    
+                    # Update temperature chart
+                    if hasattr(self, "chart_gpu_temp") and self.chart_gpu_temp is not None:
+                        try:
+                            gpu_temps = get_gpu_temperatures(self.gpu_provider)
+                            if gpu_temps and any(t > 0 for t in gpu_temps):
+                                self.chart_gpu_temp.append(gpu_temps)
+                        except Exception:
+                            pass
+                
+                # Tooltip with per-GPU details including VRAM and temperature
+                names = self.gpu_provider.gpu_names()
+                tip_parts = []
+                info_parts = []
+                gpu_temps = get_gpu_temperatures(self.gpu_provider)
+                
+                for i, u in enumerate(utils):
+                    name = names[i] if i < len(names) else f"GPU {i}"
+                    detail = f"{name}: {u:.0f}%"
+                    info_detail = f"GPU {i} ({name}): Utilization {u:.0f}%"
+                    # Add VRAM info if available
+                    if i < len(vram_info):
+                        used_mb, total_mb = vram_info[i]
+                        if total_mb > 0:
+                            detail += f" | VRAM: {used_mb:.0f}/{total_mb:.0f} MB ({used_mb/total_mb*100:.1f}%)"
+                            info_detail += f", VRAM: {used_mb:.0f}/{total_mb:.0f} MB ({used_mb/total_mb*100:.1f}%)"
+                    # Add frequency if available
+                    if i < len(freqs) and freqs[i] > 0:
+                        detail += f" | {freqs[i]:.0f} MHz"
+                        info_detail += f", Clock: {freqs[i]:.0f} MHz"
+                    # Add temperature if available
+                    if i < len(gpu_temps) and gpu_temps[i] > 0:
+                        detail += f" | {gpu_temps[i]:.0f}°C"
+                        info_detail += f", Temp: {gpu_temps[i]:.0f}°C"
+                    tip_parts.append(detail)
+                    info_parts.append(info_detail)
+                self.card_gpu.set_tooltip("\n".join(tip_parts))
+                # Update GPU tab info label
+                if self.lbl_gpu_info is not None:
+                    self.lbl_gpu_info.setText("\n".join(info_parts))
+            else:
+                self.card_gpu.set_unavailable("N/A")
+                if self.lbl_gpu_info is not None:
+                    self.lbl_gpu_info.setText("No GPU data available")
 
-        # Periodically refresh process table and summaries
+        # Periodically refresh process table and summaries (with configurable refresh rate)
         try:
             self._proc_refresh_accum += dt
         except Exception:
             self._proc_refresh_accum = 0.0
-        if self._proc_refresh_accum >= 0.5:
+        
+        proc_refresh_interval = self.spin_proc_refresh.value() / 1000.0  # Convert ms to seconds
+        if self._proc_refresh_accum >= proc_refresh_interval:
             self._proc_refresh_accum = 0.0
             self.refresh_processes()
 
@@ -830,7 +1630,7 @@ class SystemMonitor(QMainWindow):
 def main() -> None:
     app = QApplication(sys.argv)
     apply_dark_theme(app)
-    win = SystemMonitor(interval_ms=1)
+    win = SystemMonitor(interval_ms=100)
     win.show()
     sys.exit(app.exec())
 
