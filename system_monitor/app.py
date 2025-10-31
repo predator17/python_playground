@@ -32,6 +32,8 @@ class SystemMonitor(QMainWindow):
 
     def __init__(self, interval_ms: int = 100) -> None:
         super().__init__()
+        self.unit_combo_disk = None
+        self.unit_combo_net = None
         self.interval_ms = interval_ms
         self.gpu_provider = GPUProvider()
         self._paused = False
