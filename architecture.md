@@ -332,25 +332,53 @@ classDiagram
 
 ### Class Relationships Explanation
 
-**Delegation Pattern:**
+**Builder Pattern (UI Construction):**
+- `SystemMonitor._setup_ui()` calls static builder classes to construct UI
+- `ToolbarBuilder.build_toolbar(monitor)` creates and configures toolbar
+- `DashboardBuilder.build_dashboard(monitor)` creates dashboard with 7 metric cards
+- `CPUTabBuilder.build_cpu_tab(monitor)` creates CPU tab with per-core charts
+- `BasicTabsBuilder` creates Memory/Network/Disk tabs
+- `GPUTabBuilder.build_gpu_tab(monitor, gpu_names)` creates GPU tab
+- `ProcessTabBuilder` creates Process and Info tabs
+- All builders are **static utility classes** (no instances created)
+- Builders receive `monitor` (SystemMonitor instance) to configure its attributes
+
+**Factory Pattern (Chart Creation):**
+- `ChartFactory` provides static methods to create configured charts
+- `create_cpu_chart()`, `create_memory_chart()`, etc.
+- Encapsulates chart configuration (ranges, series, auto-scaling)
+- Used by SystemMonitor and builders
+
+**Delegation Pattern (Business Logic):**
 - `SystemMonitor` delegates metrics updates to `MetricsUpdater`
 - `SystemMonitor` delegates process management to `ProcessManager`
 - `SystemMonitor` delegates info gathering to `InfoManager`
+- `SystemMonitor` delegates event handling to `EventHandlers`
+- All delegated classes are **static utility classes** (no instances)
 
-**Composition:**
+**Composition (Widget Containment):**
 - `SystemMonitor` contains 7 `MetricCard` instances (CPU, Memory, Net Up/Down, Disk Read/Write, GPU)
 - `SystemMonitor` contains multiple `TimeSeriesChart` instances (main charts + per-core charts)
 - `MetricCard` optionally contains a `TimeSeriesChart` (sparkline)
+- Cards and charts are created by builders and stored in SystemMonitor attributes
 
 **Usage/Dependency:**
 - `MetricsUpdater` uses `GPUProvider` for GPU metrics
 - `MetricsUpdater` optionally uses `MetricsCollector` for parallel collection
 - `ProcessManager` manages singleton `ProcessCollector` instance
 - `InfoManager` uses `SystemInfoCache` for expensive queries
+- `EventHandlers` routes events to ProcessManager and other handlers
 
 **Inheritance:**
 - `SystemMonitor` inherits from `QMainWindow`
 - `MetricCard` and `TimeSeriesChart` inherit from `QWidget`
+
+**Key Insight: Static Utility Classes**
+Most classes in this architecture are **static utility classes** that group related functionality without requiring instantiation. They are called directly on the class name: `ClassName.method()`. This pattern:
+- Eliminates unnecessary object creation
+- Provides clear namespacing
+- Acts as organizational containers for related functions
+- Makes dependency injection explicit (pass what you need as parameters)
 
 ---
 
