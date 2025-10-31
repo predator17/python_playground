@@ -12,44 +12,64 @@ The System Monitor is a real-time desktop application built with PySide6 (Qt6) t
 
 ## High-Level Architecture
 
+The application follows a modular architecture with clear separation of concerns:
+
 ```mermaid
 graph TB
-    subgraph "Application Layer"
-        Main[main Function]
-        Theme[apply_dark_theme]
+    subgraph "Application Entry"
+        Main[app.py<br/>main + SystemMonitor]
     end
     
-    subgraph "Presentation Layer"
-        SM[SystemMonitor<br/>QMainWindow]
-        MC[MetricCard<br/>Widgets]
-        TSC[TimeSeriesChart<br/>Widgets]
+    subgraph "Core Logic Modules"
+        MU[metrics_updater.py<br/>MetricsUpdater]
+        PM[process_manager.py<br/>ProcessManager]
+        IM[info_manager.py<br/>InfoManager]
     end
     
-    subgraph "Data Layer"
-        GPU[GPUProvider]
-        PS[psutil Library]
+    subgraph "Widget Components"
+        MC[metric_card.py<br/>MetricCard]
+        TSC[time_series_chart.py<br/>TimeSeriesChart]
     end
     
-    subgraph "External Resources"
-        NVML[NVIDIA NVML]
-        SMI[nvidia-smi CLI]
-        OS[Operating System]
+    subgraph "Data Providers"
+        GPU[gpu_provider.py<br/>GPUProvider]
     end
     
-    Main --> Theme
-    Main --> SM
-    SM --> MC
-    SM --> TSC
-    SM --> GPU
-    SM --> PS
+    subgraph "Utilities"
+        SI[system_info.py<br/>System Info Helpers]
+        TH[theme.py<br/>Dark Theme]
+    end
+    
+    subgraph "External Libraries"
+        PS[psutil]
+        NVML[pynvml/nvidia-smi]
+        QT[PySide6/Qt6]
+    end
+    
+    Main --> MU
+    Main --> PM
+    Main --> IM
+    Main --> MC
+    Main --> TSC
+    Main --> GPU
+    Main --> SI
+    Main --> TH
+    
+    MU --> SI
+    MU --> GPU
+    PM --> PS
+    IM --> SI
     GPU --> NVML
-    GPU --> SMI
-    PS --> OS
+    TH --> QT
+    MC --> TSC
     
-    style SM fill:#3584e4
-    style GPU fill:#00c853
+    style Main fill:#3584e4
+    style MU fill:#00c853
+    style PM fill:#00c853
+    style IM fill:#00c853
     style MC fill:#ffd54f
-    style TSC fill:#ff5252
+    style TSC fill:#ffd54f
+    style GPU fill:#ff5252
 ```
 
 ---
@@ -651,20 +671,20 @@ tabs.addTab(custom_tab, "Custom")
 
 ```
 python_playground/
-├── play.py              # Main application (~1588 lines)
-│   ├── Helper functions          # CPU/memory/GPU queries, theme
-│   ├── GPUProvider               # GPU metrics abstraction
-│   ├── TimeSeriesChart           # Reusable chart widget
-│   ├── MetricCard                # Dashboard card widget
-│   ├── SystemMonitor             # Main window and controller
-│   └── main()                    # Entry point
-├── requirements.txt     # Dependencies (PySide6, psutil, nvidia-ml-py)
+├── play.py              # Main application (1051 lines)
+│   ├── apply_dark_theme()        # Lines 65-207
+│   ├── GPUProvider               # Lines 210-312
+│   ├── TimeSeriesChart           # Lines 316-406
+│   ├── MetricCard                # Lines 410-506
+│   ├── SystemMonitor             # Lines 509-1039
+│   └── main()                    # Lines 1042-1047
+├── requirements.txt     # Dependencies
 ├── README.md           # User documentation
-├── architecture.md     # This file (architecture documentation)
+├── architecture.md     # This file
 └── screenshots/
-    ├── main.png        # Dashboard screenshot
-    ├── cpu.png         # CPU tab screenshot
-    └── process.png     # Processes tab screenshot
+    ├── main.png
+    ├── cpu.png
+    └── process.png
 ```
 
 ---

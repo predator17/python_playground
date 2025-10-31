@@ -62,9 +62,35 @@ pip install nvidia-ml-py
 Run 运行：
 
 ```bash
-python play.py
+python system_monitor/app.py
+# Or use module syntax:
+python -m system_monitor.app
 ```
 
+
+## Project Structure | 项目结构
+
+```
+system_monitor/
+├── __init__.py
+├── app.py                      # Main application entry point
+├── core/                       # Core application logic
+│   ├── __init__.py
+│   ├── metrics_updater.py     # Real-time metrics update logic
+│   ├── process_manager.py     # Process tree management
+│   └── info_manager.py        # System information gathering
+├── providers/                  # Data providers
+│   ├── __init__.py
+│   └── gpu_provider.py        # GPU metrics (NVML/nvidia-smi)
+├── utils/                      # Utility functions
+│   ├── __init__.py
+│   ├── system_info.py         # System info helpers
+│   └── theme.py               # Dark theme styling
+└── widgets/                    # Custom Qt widgets
+    ├── __init__.py
+    ├── time_series_chart.py   # Real-time chart widget
+    └── metric_card.py          # Dashboard metric card
+```
 
 ## Usage tips | 使用提示
 
