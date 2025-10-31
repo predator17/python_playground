@@ -1,5 +1,7 @@
 """Utility functions for system information retrieval."""
 
+#      Copyright (c) 2025 predator. All rights reserved.
+
 from .system_info import (
     get_cpu_model_name,
     get_per_core_frequencies,

@@ -1,5 +1,7 @@
 """GPU data provider supporting NVML and nvidia-smi."""
 
+#      Copyright (c) 2025 predator. All rights reserved.
+
 from __future__ import annotations
 
 import shutil

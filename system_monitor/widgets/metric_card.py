@@ -1,5 +1,7 @@
 """Metric card widget for displaying system metrics."""
 
+#      Copyright (c) 2025 predator. All rights reserved.
+
 from __future__ import annotations
 
 from typing import Optional

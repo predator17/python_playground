@@ -1,5 +1,7 @@
 """Theme and styling utilities for the application."""
 
+#      Copyright (c) 2025 predator. All rights reserved.
+
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QPalette, QColor
 

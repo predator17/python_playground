@@ -17,13 +17,15 @@ Notes:
 - Uses QtCharts for efficient, built-in plotting (no extra plotting libs required).
 - Keyboard shortcuts: P=Pause, R=Resume, Esc=Quit
 """
+#      Copyright (c) 2025 predator. All rights reserved.
+
 from __future__ import annotations
 
 import sys
-import platform
-import asyncio
+
+
 import math
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 try:
     import psutil  # type: ignore
@@ -31,7 +33,7 @@ except Exception as e:
     print("psutil is required. Install with: pip install psutil")
     raise
 
-from PySide6.QtCore import Qt, QTimer, QMargins, QElapsedTimer, Signal, QObject
+from PySide6.QtCore import Qt, QTimer, QMargins, QElapsedTimer
 from PySide6.QtGui import QColor, QKeySequence, QAction
 from PySide6.QtWidgets import (
     QApplication,
@@ -42,29 +44,22 @@ from PySide6.QtWidgets import (
     QLabel,
     QTabWidget,
     QTextEdit,
-    QSizePolicy,
     QFrame,
     QHBoxLayout,
     QComboBox,
-    QTableWidget,
-    QTableWidgetItem,
     QHeaderView,
     QSpinBox,
-    QToolBar,
     QScrollArea,
     QTreeWidget,
     QTreeWidgetItem,
     QLineEdit,
     QPushButton,
 )
-from PySide6.QtCharts import QLineSeries
 
 from providers import GPUProvider
 from utils import (
     get_cpu_model_name,
-    get_per_core_frequencies,
     get_memory_frequency,
-    get_cpu_temperatures,
     get_gpu_temperatures,
     apply_dark_theme,
 )

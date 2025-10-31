@@ -1,5 +1,7 @@
 """Unit tests for system_monitor.providers.gpu_provider module."""
 
+#      Copyright (c) 2025 predator. All rights reserved.
+
 import unittest
 from unittest.mock import patch, MagicMock, call
 import subprocess

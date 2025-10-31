@@ -1,5 +1,7 @@
 """Unit tests for system_monitor.utils.theme module."""
 
+#      Copyright (c) 2025 predator. All rights reserved.
+
 import unittest
 from unittest.mock import MagicMock, patch
 

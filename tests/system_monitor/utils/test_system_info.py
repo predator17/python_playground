@@ -1,5 +1,7 @@
 """Unit tests for system_monitor.utils.system_info module."""
 
+#      Copyright (c) 2025 predator. All rights reserved.
+
 import unittest
 from unittest.mock import patch, MagicMock, mock_open
 import subprocess

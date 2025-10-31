@@ -20,4 +20,6 @@ Notes:
 - Keyboard shortcuts: P=Pause, R=Resume, Esc=Quit
 """
 
+#      Copyright (c) 2025 predator. All rights reserved.
+
 __version__ = "1.0.0"

@@ -1,5 +1,7 @@
 """Metrics updater for SystemMonitor - handles periodic metric updates."""
 
+#      Copyright (c) 2025 predator. All rights reserved.
+
 import math
 from typing import TYPE_CHECKING
 

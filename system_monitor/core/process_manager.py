@@ -1,5 +1,7 @@
 """Process manager for SystemMonitor - handles process tree and filtering."""
 
+#      Copyright (c) 2025 predator. All rights reserved.
+
 import asyncio
 from typing import TYPE_CHECKING
 

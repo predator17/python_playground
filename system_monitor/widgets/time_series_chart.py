@@ -1,5 +1,7 @@
 """Time series chart widget for displaying real-time data."""
 
+#      Copyright (c) 2025 predator. All rights reserved.
+
 from __future__ import annotations
 
 from typing import List, Optional, Tuple

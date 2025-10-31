@@ -1,5 +1,7 @@
 """System information manager for SystemMonitor."""
 
+#      Copyright (c) 2025 predator. All rights reserved.
+
 import sys
 import platform
 from typing import TYPE_CHECKING

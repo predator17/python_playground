@@ -1,5 +1,7 @@
 """System information utility functions."""
 
+#      Copyright (c) 2025 predator. All rights reserved.
+
 from __future__ import annotations
 
 import platform
