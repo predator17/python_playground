@@ -9,6 +9,19 @@ from unittest.mock import MagicMock, patch
 class TestSystemMonitorIntegration(unittest.TestCase):
     """Integration tests for SystemMonitor application."""
 
+    @classmethod
+    def setUpClass(cls):
+        """Set up QApplication for all tests in this class."""
+        from PySide6.QtWidgets import QApplication
+        import sys
+        cls.qapp = QApplication.instance() or QApplication(sys.argv)
+
+    @classmethod
+    def tearDownClass(cls):
+        """Clean up QApplication after all tests."""
+        # Don't quit the app as it might be needed by other tests
+        pass
+
     def _setup_mocks(self, mock_psutil, mock_gpu):
         """Setup common mocks for SystemMonitor tests."""
         # Mock psutil methods
@@ -100,13 +113,16 @@ class TestSystemMonitorIntegration(unittest.TestCase):
     def test_system_monitor_close_event_cleanup(self, mock_shutdown, mock_psutil, mock_gpu, mock_theme):
         """Test closeEvent properly cleans up resources."""
         from system_monitor.app import SystemMonitor
+        from PySide6.QtGui import QCloseEvent
+        from PySide6.QtCore import QEvent
         
         self._setup_mocks(mock_psutil, mock_gpu)
         
         monitor = SystemMonitor(interval_ms=100)
-        mock_event = MagicMock()
+        # Create a real QCloseEvent instead of MagicMock
+        event = QCloseEvent()
         
-        monitor.closeEvent(mock_event)
+        monitor.closeEvent(event)
         
         mock_shutdown.assert_called_once()
 
