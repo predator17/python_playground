@@ -4,14 +4,6 @@
 
 import unittest
 from unittest.mock import MagicMock, patch, PropertyMock
-import sys
-
-# Mock PySide6 before importing widgets
-sys.modules['PySide6'] = MagicMock()
-sys.modules['PySide6.QtCore'] = MagicMock()
-sys.modules['PySide6.QtGui'] = MagicMock()
-sys.modules['PySide6.QtWidgets'] = MagicMock()
-sys.modules['PySide6.QtCharts'] = MagicMock()
 
 from system_monitor.widgets.time_series_chart import TimeSeriesChart
 from system_monitor.widgets.metric_card import MetricCard

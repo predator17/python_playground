@@ -28,6 +28,8 @@ Fast, elegant, real‑time system monitor for desktop. Built with PySide6 + psut
 - User‑configurable update intervals: global (default 100ms), GPU refresh, Process refresh
 - Unit switcher for throughput: MB/s or MiB/s (formulas shown in UI)
 - Non‑blocking GPU stats via NVML or background `nvidia-smi`
+- **Performance optimizations**: Background threading for process enumeration, caching for expensive system info queries
+- **Efficient design patterns**: Singleton cache, ThreadPoolExecutor for concurrency, Producer-Consumer pattern
 - Keyboard shortcuts: P=Pause/Resume, Esc=Quit
 
 - 总览卡片 + 曲线图，覆盖 CPU / 内存 / 网络 / 磁盘 / GPU
@@ -73,23 +75,36 @@ python -m system_monitor.app
 ```
 system_monitor/
 ├── __init__.py
-├── app.py                      # Main application entry point
-├── core/                       # Core application logic
+├── app.py                          # Main application entry point (154 lines)
+├── core/                           # Core application logic
 │   ├── __init__.py
-│   ├── metrics_updater.py     # Real-time metrics update logic
-│   ├── process_manager.py     # Process tree management
-│   └── info_manager.py        # System information gathering
-├── providers/                  # Data providers
+│   ├── info_manager.py             # System information gathering (93 lines)
+│   ├── metrics_collector.py        # Parallel metrics collection (126 lines)
+│   ├── metrics_updater.py          # Real-time metrics update logic (233 lines)
+│   ├── process_collector.py        # Background process collection (174 lines)
+│   └── process_manager.py          # Process tree management (222 lines)
+├── providers/                      # Data providers
 │   ├── __init__.py
-│   └── gpu_provider.py        # GPU metrics (NVML/nvidia-smi)
-├── utils/                      # Utility functions
+│   └── gpu_provider.py             # GPU metrics (NVML/nvidia-smi) (196 lines)
+├── ui/                             # UI builders and event handlers
 │   ├── __init__.py
-│   ├── system_info.py         # System info helpers
-│   └── theme.py               # Dark theme styling
-└── widgets/                    # Custom Qt widgets
+│   ├── basic_tabs_builder.py       # Memory/Network/Disk tabs (79 lines)
+│   ├── chart_factory.py            # Chart creation factory (53 lines)
+│   ├── cpu_tab_builder.py          # CPU tab with per-core charts (106 lines)
+│   ├── dashboard_builder.py        # Dashboard with metric cards (82 lines)
+│   ├── event_handlers.py           # Event handling logic (85 lines)
+│   ├── gpu_tab_builder.py          # GPU tab builder (89 lines)
+│   ├── process_tab_builder.py      # Process/Info tabs (80 lines)
+│   └── toolbar_builder.py          # Toolbar builder (78 lines)
+├── utils/                          # Utility functions
+│   ├── __init__.py
+│   ├── cache.py                    # Caching singleton for expensive queries (98 lines)
+│   ├── system_info.py              # System info helpers (188 lines)
+│   └── theme.py                    # Dark theme styling (152 lines)
+└── widgets/                        # Custom Qt widgets
     ├── __init__.py
-    ├── time_series_chart.py   # Real-time chart widget
-    └── metric_card.py          # Dashboard metric card
+    ├── metric_card.py              # Dashboard metric card (167 lines)
+    └── time_series_chart.py        # Real-time chart widget (97 lines)
 ```
 
 ## Usage tips | 使用提示

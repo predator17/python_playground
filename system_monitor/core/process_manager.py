@@ -3,7 +3,7 @@
 #      Copyright (c) 2025 predator. All rights reserved.
 
 import asyncio
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 try:
     import psutil
@@ -11,13 +11,32 @@ except ImportError:
     psutil = None
 
 from PySide6.QtWidgets import QTreeWidgetItem
+from .process_collector import ProcessCollector
 
 if TYPE_CHECKING:
     from system_monitor.app import SystemMonitor
 
 
 class ProcessManager:
-    """Handles process tree building and management."""
+    """Handles process tree building and management.
+    
+    Uses ProcessCollector for background process enumeration to avoid blocking UI.
+    """
+    
+    _collector: Optional[ProcessCollector] = None
+    
+    @classmethod
+    def initialize_collector(cls) -> None:
+        """Initialize the process collector (call once at app startup)."""
+        if cls._collector is None:
+            cls._collector = ProcessCollector(max_workers=1)
+    
+    @classmethod
+    def shutdown_collector(cls) -> None:
+        """Shutdown the process collector (call at app shutdown)."""
+        if cls._collector is not None:
+            cls._collector.shutdown()
+            cls._collector = None
 
     @staticmethod
     def on_proc_item_expanded(monitor: 'SystemMonitor', item: QTreeWidgetItem) -> None:
@@ -42,9 +61,13 @@ class ProcessManager:
 
     @staticmethod
     def refresh_processes(monitor: 'SystemMonitor') -> None:
-        """Refresh the process tree with core affinity grouping."""
+        """Refresh the process tree with core affinity grouping (async version).
+        
+        Uses ProcessCollector to gather data in background thread, then consumes
+        results from queue to update UI without blocking.
+        """
         try:
-            # First pass: prime per-process CPU percentages
+            # First pass: prime per-process CPU percentages (still synchronous, but fast)
             if not getattr(monitor, "_procs_primed", False):
                 for p in psutil.process_iter():
                     try:
@@ -53,45 +76,39 @@ class ProcessManager:
                         pass
                 monitor._procs_primed = True
                 return
-
-            # Collect process data
-            n_cores = psutil.cpu_count(logical=True) or 1
-            core_processes = {i: [] for i in range(n_cores)}
-            all_cores_processes = []
             
-            total_threads = 0
-            proc_count = 0
+            # Initialize collector if needed
+            if ProcessManager._collector is None:
+                ProcessManager.initialize_collector()
             
-            for p in psutil.process_iter(['pid', 'name', 'memory_percent', 'num_threads']):
-                proc_count += 1
-                try:
-                    cpu = float(p.cpu_percent(None))
-                except Exception:
-                    cpu = 0.0
-                mem = float(p.info.get('memory_percent') or 0.0)
-                threads = int(p.info.get('num_threads') or 0)
-                total_threads += threads
-                pid = p.info.get('pid')
-                name = p.info.get('name') or ""
-                
-                # Apply search filter if active
-                if monitor._proc_filter:
-                    if monitor._proc_filter not in name.lower() and monitor._proc_filter not in str(pid):
-                        continue
-                
-                # Get CPU affinity and thread details
-                try:
-                    affinity = p.cpu_affinity()
-                    if affinity and len(affinity) < n_cores:
-                        # Process is pinned to specific cores
-                        for core_id in affinity:
-                            if core_id < n_cores:
-                                core_processes[core_id].append((cpu, pid, name, mem, threads, p))
-                    else:
-                        # Process can run on all cores
-                        all_cores_processes.append((cpu, pid, name, mem, threads, p))
-                except Exception:
-                    all_cores_processes.append((cpu, pid, name, mem, threads, p))
+            # Check if we have a result ready from previous collection
+            result = ProcessManager._collector.get_result()
+            if result is not None:
+                # We have data ready, update the UI
+                ProcessManager._update_ui_with_result(monitor, result)
+            
+            # Start new async collection if not already collecting
+            if not ProcessManager._collector.is_collecting():
+                n_cores = psutil.cpu_count(logical=True) or 1
+                ProcessManager._collector.collect_async(n_cores, monitor._proc_filter)
+            
+        except Exception:
+            pass
+    
+    @staticmethod
+    def _update_ui_with_result(monitor: 'SystemMonitor', result: dict) -> None:
+        """Update UI with collected process data (called in main thread).
+        
+        Args:
+            monitor: SystemMonitor instance
+            result: Dictionary with process data from collector
+        """
+        try:
+            core_processes = result.get('core_processes', {})
+            proc_count = result.get('proc_count', 0)
+            total_threads = result.get('total_threads', 0)
+            
+            n_cores = len(core_processes)
             
             # Save current expansion state before clearing
             expanded_cores, expanded_processes = ProcessManager._save_expansion_state(monitor, n_cores)

@@ -14,7 +14,10 @@ except Exception as e:
     print("psutil is required. Install with: pip install psutil")
     raise
 
+from .cache import cached_static_property
 
+
+@cached_static_property('cpu_model_name')
 def get_cpu_model_name() -> str:
     """Get CPU model/brand name."""
     try:
@@ -86,6 +89,7 @@ def get_per_core_frequencies() -> List[float]:
         return []
 
 
+@cached_static_property('memory_frequency')
 def get_memory_frequency() -> float:
     """Get RAM frequency in MHz. Returns 0 if not available."""
     try:
