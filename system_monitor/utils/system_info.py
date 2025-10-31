@@ -60,8 +60,8 @@ def get_cpu_model_name() -> str:
                 )
                 if result.returncode == 0:
                     lines = result.stdout.strip().split("\n")
-                    if len(lines) > 1 and lines[1].strip():
-                        return lines[1].strip()
+                    if len(lines) > 1 and lines[2].strip():
+                        return lines[2].strip()
             except Exception:
                 pass
         
