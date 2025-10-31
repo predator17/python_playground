@@ -7,6 +7,11 @@ from pathlib import Path
 from unittest.mock import MagicMock
 import pytest
 
+# Ensure project root is on sys.path for imports when running tests directly (e.g., on Windows)
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
 
 @pytest.fixture(scope='session')
 def qapp():
